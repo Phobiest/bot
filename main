@@ -17,6 +17,9 @@ dp = Dispatcher()
 # Хранилище данных
 user_data = {}
 
+# ID администратора для уведомлений (замените на свой)
+ADMIN_ID = 6236189739  # ⚠️ ЗАМЕНИТЕ НА ВАШ ID
+
 # Список наград
 REWARDS = {
     50: "Талисман 'Медовые соты'",
@@ -44,7 +47,8 @@ async def start_cmd(message: types.Message):
         "/daily - Ежедневная награда\n"
         "/balance - Баланс\n" 
         "/rewards - Список наград\n"
-        "/top - Топ игроков"
+        "/top - Топ игроков\n\n"
+        "🛒 <b>Для покупки:</b> напиши 'куплю [номер]'"
     )
 
 @dp.message(Command("daily"))
@@ -98,7 +102,8 @@ async def rewards_cmd(message: types.Message):
         else:
             text += f"❌ {cost} ⭐ - {reward}\n"
     
-    text += "\n💎 Обратись к админу для получения"
+    text += "\n🛒 <b>Для покупки:</b> напиши 'куплю [номер]'\n"
+    text += "💎 После покупки отправь админу номер покупки в ЛС"
     await message.answer(text)
 
 @dp.message(Command("top"))
@@ -122,6 +127,79 @@ async def top_cmd(message: types.Message):
         text += f"{i}. {name} - {balance} ⭐\n"
     
     await message.answer(text)
+
+# Обработчик покупки
+@dp.message(lambda message: message.text and message.text.lower().startswith('куплю'))
+async def buy_reward(message: types.Message):
+    user_id = message.from_user.id
+    
+    if user_id not in user_data:
+        await message.answer("❌ Сначала зарегистрируйтесь через /start")
+        return
+    
+    try:
+        # Извлекаем номер из сообщения "куплю 5"
+        reward_num = int(message.text.split()[1])
+    except (IndexError, ValueError):
+        await message.answer("❌ Используйте формат: <b>куплю [номер]</b>\nНапример: <code>куплю 5</code>")
+        return
+    
+    if reward_num not in REWARDS:
+        await message.answer("❌ Такого номера награды не существует!\nПосмотреть номера: /rewards")
+        return
+    
+    cost = reward_num  # Стоимость = номеру награды
+    balance = user_data[user_id]["balance"]
+    
+    if balance < cost:
+        await message.answer(f"❌ Недостаточно баллов!\nНужно: {cost} ⭐\nУ вас: {balance} ⭐")
+        return
+    
+    # Создаем номер покупки
+    purchase_id = random.randint(1000, 9999)
+    
+    # Списание баллов
+    user_data[user_id]["balance"] -= cost
+    reward = REWARDS[reward_num]
+    
+    # Сообщение пользователю
+    user_text = f"""
+🎊 <b>Покупка оформлена!</b>
+
+📦 <b>Номер покупки:</b> <code>#{purchase_id}</code>
+🎁 <b>Товар:</b> {reward}
+💰 <b>Списано:</b> {cost} ⭐
+💳 <b>Осталось:</b> {user_data[user_id]['balance']} ⭐
+
+📞 <b>Дальнейшие действия:</b>
+1. Заскринь переписку с кодом: <code>#{purchase_id}</code>
+2. Напиши админу в ЛС этот код
+3. Получи свой товар в игре!
+
+⚡ <i>Админ свяжется с тобой в ближайшее время</i>
+    """
+    
+    await message.answer(user_text)
+    
+    # Уведомление админу (если ADMIN_ID установлен)
+    if ADMIN_ID:
+        try:
+            user_info = await bot.get_chat(user_id)
+            admin_text = f"""
+🛒 <b>НОВАЯ ПОКУПКА!</b>
+
+👤 <b>Покупатель:</b> {user_info.first_name} (@{user_info.username or 'нет'})
+📞 <b>ID:</b> <code>{user_id}</code>
+📦 <b>Номер покупки:</b> <code>#{purchase_id}</code>
+🎁 <b>Товар:</b> {reward}
+💰 <b>Стоимость:</b> {cost} ⭐
+💳 <b>Баланс после:</b> {user_data[user_id]['balance']} ⭐
+
+⚡ <i>Ожидает выдачи товара</i>
+            """
+            await bot.send_message(ADMIN_ID, admin_text)
+        except Exception as e:
+            print(f"❌ Не удалось уведомить админа: {e}")
 
 async def main():
     print("🤖 Бот запускается...")
