@@ -25,6 +25,10 @@ REQUIRED_CHANNELS = [
     {"id": "@goidagoidagoidagoida", "name": "Обсуждение", "url": "https://t.me/goidagoidagoidagoida"}
 ]
 
+# Настройки реферальной системы
+REFERRAL_BONUS = 100  # Баллов за приглашенного друга
+REFERRER_BONUS = 50   # Баллов тому, кто пригласил
+
 # Загрузка данных из файла
 def load_user_data():
     if os.path.exists(DATA_FILE):
@@ -32,7 +36,15 @@ def load_user_data():
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 # Конвертируем ключи обратно в int (при сохранении в JSON ключи становятся строками)
-                return {int(k): v for k, v in data.items()}
+                converted_data = {}
+                for k, v in data.items():
+                    converted_data[int(k)] = v
+                    # Добавляем поля для реферальной системы, если их нет
+                    if 'referrals' not in v:
+                        v['referrals'] = []
+                    if 'referrer' not in v:
+                        v['referrer'] = None
+                return converted_data
         except (json.JSONDecodeError, KeyError, ValueError):
             return {}
     return {}
@@ -88,6 +100,10 @@ def get_subscription_keyboard():
     ])
     return keyboard
 
+# Генерация реферальной ссылки
+def generate_referral_link(user_id: int):
+    return f"https://t.me/{(await bot.get_me()).username}?start=ref{user_id}"
+
 # Обработчик нажатия кнопки проверки подписки
 @dp.callback_query(lambda c: c.data == "check_subscription")
 async def check_subscription_callback(callback: types.CallbackQuery):
@@ -95,7 +111,12 @@ async def check_subscription_callback(callback: types.CallbackQuery):
     
     if await check_subscription(user_id):
         if user_id not in user_data:
-            user_data[user_id] = {"balance": 0, "last_daily": None}
+            user_data[user_id] = {
+                "balance": 0, 
+                "last_daily": None,
+                "referrals": [],
+                "referrer": None
+            }
             save_user_data()
         
         await callback.message.edit_text(
@@ -105,7 +126,8 @@ async def check_subscription_callback(callback: types.CallbackQuery):
             "/daily - Ежедневная награда\n"
             "/balance - Баланс\n" 
             "/rewards - Список наград\n"
-            "/top - Топ игроков\n\n"
+            "/top - Топ игроков\n"
+            "/referral - Реферальная система\n\n"
             "🛒 <b>Для покупки:</b> напиши 'куплю [номер]'"
         )
     else:
@@ -114,6 +136,17 @@ async def check_subscription_callback(callback: types.CallbackQuery):
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
+    args = message.text.split()
+    
+    # Обработка реферальной ссылки
+    referrer_id = None
+    if len(args) > 1 and args[1].startswith('ref'):
+        try:
+            referrer_id = int(args[1][3:])  # Извлекаем ID из ref123456
+            if referrer_id == user_id:
+                referrer_id = None  # Нельзя приглашать самого себя
+        except ValueError:
+            referrer_id = None
     
     # Проверяем подписку
     if not await check_subscription(user_id):
@@ -131,18 +164,93 @@ async def start_cmd(message: types.Message):
     
     # Если подписан, продолжаем как обычно
     if user_id not in user_data:
-        user_data[user_id] = {"balance": 0, "last_daily": None}
-        save_user_data()  # Сохраняем при создании нового пользователя
+        user_data[user_id] = {
+            "balance": 0, 
+            "last_daily": None,
+            "referrals": [],
+            "referrer": referrer_id
+        }
+        
+        # Начисляем бонусы за реферала
+        if referrer_id and referrer_id in user_data:
+            # Бонус приглашенному
+            user_data[user_id]["balance"] += REFERRAL_BONUS
+            
+            # Бонус пригласившему
+            user_data[referrer_id]["balance"] += REFERRER_BONUS
+            user_data[referrer_id]["referrals"].append(user_id)
+            
+            # Уведомляем пригласившего
+            try:
+                await bot.send_message(
+                    referrer_id,
+                    f"🎉 <b>По твоей ссылке зарегистрировался новый пользователь!</b>\n\n"
+                    f"💫 Ты получил: <b>+{REFERRER_BONUS} ⭐</b>\n"
+                    f"👤 Твой друг получил: <b>+{REFERRAL_BONUS} ⭐</b>\n"
+                    f"📊 Всего рефералов: <b>{len(user_data[referrer_id]['referrals'])}</b>"
+                )
+            except:
+                pass  # Если не удалось отправить уведомление
+        
+        save_user_data()
     
-    await message.answer(
+    welcome_text = (
         "🌟 <b>Nexus Space Bot</b>\n\n"
         "Команды:\n"
         "/daily - Ежедневная награда\n"
         "/balance - Баланс\n" 
         "/rewards - Список наград\n"
-        "/top - Топ игроков\n\n"
+        "/top - Топ игроков\n"
+        "/referral - Реферальная система\n\n"
         "🛒 <b>Для покупки:</b> напиши 'куплю [номер]'"
     )
+    
+    # Если пользователь пришел по реферальной ссылке, показываем бонус
+    if referrer_id and user_id in user_data and user_data[user_id]["balance"] >= REFERRAL_BONUS:
+        welcome_text = f"🎁 <b>Реферальный бонус: +{REFERRAL_BONUS} ⭐</b>\n\n" + welcome_text
+    
+    await message.answer(welcome_text)
+
+# Команда реферальной системы
+@dp.message(Command("referral"))
+@subscription_required
+async def referral_cmd(message: types.Message):
+    user_id = message.from_user.id
+    
+    if user_id not in user_data:
+        user_data[user_id] = {
+            "balance": 0, 
+            "last_daily": None,
+            "referrals": [],
+            "referrer": None
+        }
+        save_user_data()
+    
+    referral_link = f"https://t.me/{(await bot.get_me()).username}?start=ref{user_id}"
+    referral_count = len(user_data[user_id]["referrals"])
+    total_earned = referral_count * REFERRER_BONUS
+    
+    text = (
+        "👥 <b>Реферальная система</b>\n\n"
+        f"🔗 <b>Твоя ссылка:</b>\n<code>{referral_link}</code>\n\n"
+        f"📊 <b>Статистика:</b>\n"
+        f"• Приглашено друзей: <b>{referral_count}</b>\n"
+        f"• Заработано баллов: <b>{total_earned} ⭐</b>\n\n"
+        f"🎁 <b>Бонусы:</b>\n"
+        f"• Друг получает: <b>+{REFERRAL_BONUS} ⭐</b>\n"
+        f"• Ты получаешь: <b>+{REFERRER_BONUS} ⭐</b> за каждого\n\n"
+        f"💫 <b>Как использовать:</b>\n"
+        f"1. Отправь другу свою ссылку\n"
+        f"2. Друг должен нажать на ссылку\n"
+        f"3. Оба получаете бонусы!"
+    )
+    
+    # Создаем кнопку для быстрого分享 ссылки
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={referral_link}&text=Присоединяйся%20к%20Nexus%20Space%20Bot!%20🎮")]
+    ])
+    
+    await message.answer(text, reply_markup=keyboard)
 
 # Декоратор для проверки подписки перед выполнением команд
 def subscription_required(func):
@@ -172,7 +280,12 @@ async def daily_cmd(message: types.Message):
     today = datetime.now().date()
     
     if user_id not in user_data:
-        user_data[user_id] = {"balance": 0, "last_daily": None}
+        user_data[user_id] = {
+            "balance": 0, 
+            "last_daily": None,
+            "referrals": [],
+            "referrer": None
+        }
     
     last_daily = user_data[user_id]["last_daily"]
     
@@ -203,11 +316,22 @@ async def balance_cmd(message: types.Message):
     user_id = message.from_user.id
     
     if user_id not in user_data:
-        user_data[user_id] = {"balance": 0, "last_daily": None}
+        user_data[user_id] = {
+            "balance": 0, 
+            "last_daily": None,
+            "referrals": [],
+            "referrer": None
+        }
         save_user_data()
     
     balance = user_data[user_id]["balance"]
-    await message.answer(f"💰 Баланс: {balance} ⭐")
+    referral_count = len(user_data[user_id]["referrals"])
+    
+    text = f"💰 Баланс: {balance} ⭐"
+    if referral_count > 0:
+        text += f"\n👥 Приглашено друзей: {referral_count}"
+    
+    await message.answer(text)
 
 @dp.message(Command("rewards"))
 @subscription_required
@@ -215,7 +339,12 @@ async def rewards_cmd(message: types.Message):
     user_id = message.from_user.id
     
     if user_id not in user_data:
-        user_data[user_id] = {"balance": 0, "last_daily": None}
+        user_data[user_id] = {
+            "balance": 0, 
+            "last_daily": None,
+            "referrals": [],
+            "referrer": None
+        }
         save_user_data()
     
     balance = user_data[user_id]["balance"]
@@ -251,7 +380,11 @@ async def top_cmd(message: types.Message):
             name = f"Игрок {user_id}"
         
         balance = data["balance"]
-        text += f"{i}. {name} - {balance} ⭐\n"
+        referrals_count = len(data.get("referrals", []))
+        text += f"{i}. {name} - {balance} ⭐"
+        if referrals_count > 0:
+            text += f" (👥 {referrals_count})"
+        text += "\n"
     
     await message.answer(text)
 
