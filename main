@@ -1,0 +1,137 @@
+import asyncio
+import random
+from datetime import datetime
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
+
+TOKEN = "7989061206:AAEHzYzKjoDdUzL3wkry-CclObKinqZeE3o"
+
+# Создаем бота с правильными параметрами
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
+dp = Dispatcher()
+
+# Хранилище данных
+user_data = {}
+
+# Список наград
+REWARDS = {
+    50: "Талисман 'Медовые соты'",
+    100: "Талисман 'Лапка кролика'", 
+    150: "Талисман 'Черепашья мощь'", 
+    200: "100 валюты",
+    450: "1000 валюты",
+    1000: "Броня Type B",
+    2000: "Броня Type A",
+    2500: "Шалкер зелий",
+    4000: "Броня Type X",
+    6000: "Броня Type Y",
+    10000: "Рандомное спец оружие"
+}
+
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
+    user_id = message.from_user.id
+    if user_id not in user_data:
+        user_data[user_id] = {"balance": 0, "last_daily": None}
+    
+    await message.answer(
+        "🌟 <b>Nexus Space Bot</b>\n\n"
+        "Команды:\n"
+        "/daily - Ежедневная награда\n"
+        "/balance - Баланс\n" 
+        "/rewards - Список наград\n"
+        "/top - Топ игроков"
+    )
+
+@dp.message(Command("daily"))
+async def daily_cmd(message: types.Message):
+    user_id = message.from_user.id
+    today = datetime.now().date()
+    
+    if user_id not in user_data:
+        user_data[user_id] = {"balance": 0, "last_daily": None}
+    
+    last_daily = user_data[user_id]["last_daily"]
+    
+    if last_daily and last_daily == today:
+        await message.answer("❌ Уже получал награду сегодня!")
+        return
+    
+    points = random.randint(1, 150)
+    user_data[user_id]["balance"] += points
+    user_data[user_id]["last_daily"] = today
+    
+    await message.answer(
+        f"🎉 +{points} ⭐\n"
+        f"Баланс: {user_data[user_id]['balance']} ⭐\n"
+        f"Награды: /rewards"
+    )
+
+@dp.message(Command("balance"))
+async def balance_cmd(message: types.Message):
+    user_id = message.from_user.id
+    
+    if user_id not in user_data:
+        user_data[user_id] = {"balance": 0, "last_daily": None}
+    
+    balance = user_data[user_id]["balance"]
+    await message.answer(f"💰 Баланс: {balance} ⭐")
+
+@dp.message(Command("rewards"))
+async def rewards_cmd(message: types.Message):
+    user_id = message.from_user.id
+    
+    if user_id not in user_data:
+        user_data[user_id] = {"balance": 0, "last_daily": None}
+    
+    balance = user_data[user_id]["balance"]
+    
+    text = f"🎁 Награды (Ваш баланс: {balance} ⭐)\n\n"
+    
+    for cost, reward in REWARDS.items():
+        if balance >= cost:
+            text += f"✅ {cost} ⭐ - {reward}\n"
+        else:
+            text += f"❌ {cost} ⭐ - {reward}\n"
+    
+    text += "\n💎 Обратись к админу для получения"
+    await message.answer(text)
+
+@dp.message(Command("top"))
+async def top_cmd(message: types.Message):
+    if not user_data:
+        await message.answer("📊 Нет данных")
+        return
+    
+    top_users = sorted(user_data.items(), key=lambda x: x[1]["balance"], reverse=True)[:5]
+    
+    text = "🏆 Топ игроков:\n\n"
+    
+    for i, (user_id, data) in enumerate(top_users, 1):
+        try:
+            user = await bot.get_chat(user_id)
+            name = user.first_name or f"Игрок {user_id}"
+        except:
+            name = f"Игрок {user_id}"
+        
+        balance = data["balance"]
+        text += f"{i}. {name} - {balance} ⭐\n"
+    
+    await message.answer(text)
+
+async def main():
+    print("🤖 Бот запускается...")
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        print("🔄 Перезапуск через 10 секунд...")
+        await asyncio.sleep(10)
+        await main()
+
+if __name__ == "__main__":
+    asyncio.run(main())
