@@ -100,9 +100,10 @@ def get_subscription_keyboard():
     ])
     return keyboard
 
-# Генерация реферальной ссылки
-def generate_referral_link(user_id: int):
-    return f"https://t.me/{(await bot.get_me()).username}?start=ref{user_id}"
+# Генерация реферальной ссылки (асинхронная версия)
+async def generate_referral_link(user_id: int):
+    bot_info = await bot.get_me()
+    return f"https://t.me/{bot_info.username}?start=ref{user_id}"
 
 # Обработчик нажатия кнопки проверки подписки
 @dp.callback_query(lambda c: c.data == "check_subscription")
@@ -213,9 +214,22 @@ async def start_cmd(message: types.Message):
 
 # Команда реферальной системы
 @dp.message(Command("referral"))
-@subscription_required
 async def referral_cmd(message: types.Message):
     user_id = message.from_user.id
+    
+    # Проверяем подписку
+    if not await check_subscription(user_id):
+        subscription_text = "❌ <b>Для использования этой команды необходимо подписаться на наши каналы:</b>\n\n"
+        for channel in REQUIRED_CHANNELS:
+            subscription_text += f"🔹 {channel['name']} - {channel['url']}\n"
+        
+        subscription_text += "\nПосле подписки нажми кнопку ниже 👇"
+        
+        await message.answer(
+            subscription_text,
+            reply_markup=get_subscription_keyboard()
+        )
+        return
     
     if user_id not in user_data:
         user_data[user_id] = {
@@ -226,7 +240,7 @@ async def referral_cmd(message: types.Message):
         }
         save_user_data()
     
-    referral_link = f"https://t.me/{(await bot.get_me()).username}?start=ref{user_id}"
+    referral_link = await generate_referral_link(user_id)
     referral_count = len(user_data[user_id]["referrals"])
     total_earned = referral_count * REFERRER_BONUS
     
