@@ -19,12 +19,6 @@ dp = Dispatcher()
 # Файл для хранения данных
 DATA_FILE = "user_data.json"
 
-# Каналы для подписки
-REQUIRED_CHANNELS = [
-    {"id": "@Gogoida52", "name": "Новости", "url": "https://t.me/Gogoida52"},
-    {"id": "@goidagoidagoidagoida", "name": "Обсуждение", "url": "https://t.me/goidagoidagoidagoida"}
-]
-
 # Настройки реферальной системы
 REFERRAL_BONUS = 100  # Баллов за приглашенного друга
 REFERRER_BONUS = 50   # Баллов тому, кто пригласил
@@ -75,60 +69,6 @@ REWARDS = {
     10000: "Рандомное спец оружие"
 }
 
-# Функция проверки подписки
-async def check_subscription(user_id: int) -> bool:
-    """Проверяет, подписан ли пользователь на все обязательные каналы"""
-    for channel in REQUIRED_CHANNELS:
-        try:
-            member = await bot.get_chat_member(chat_id=channel["id"], user_id=user_id)
-            if member.status in ['left', 'kicked']:
-                return False
-        except Exception as e:
-            print(f"Ошибка при проверке подписки на {channel['name']}: {e}")
-            return False
-    return True
-
-# Функция создания кнопок подписки
-def get_subscription_keyboard():
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[])
-    for channel in REQUIRED_CHANNELS:
-        keyboard.inline_keyboard.append([
-            types.InlineKeyboardButton(text=f"📢 {channel['name']}", url=channel["url"])
-        ])
-    keyboard.inline_keyboard.append([
-        types.InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription")
-    ])
-    return keyboard
-
-# Обработчик нажатия кнопки проверки подписки
-@dp.callback_query(lambda c: c.data == "check_subscription")
-async def check_subscription_callback(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    
-    if await check_subscription(user_id):
-        if user_id not in user_data:
-            user_data[user_id] = {
-                "balance": 0, 
-                "last_daily": None,
-                "referrals": [],
-                "referrer": None
-            }
-            save_user_data()
-        
-        await callback.message.edit_text(
-            "🎉 <b>Отлично! Ты подписан на все каналы!</b>\n\n"
-            "🌟 <b>Nexus Space Bot</b>\n\n"
-            "Команды:\n"
-            "/daily - Ежедневная награда\n"
-            "/balance - Баланс\n" 
-            "/rewards - Список наград\n"
-            "/top - Топ игроков\n"
-            "/referral - Реферальная система\n\n"
-            "🛒 <b>Для покупки:</b> напиши 'куплю [номер]'"
-        )
-    else:
-        await callback.answer("❌ Ты еще не подписался на все каналы!", show_alert=True)
-
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     user_id = message.from_user.id
@@ -143,20 +83,6 @@ async def start_cmd(message: types.Message):
                 referrer_id = None  # Нельзя приглашать самого себя
         except ValueError:
             referrer_id = None
-    
-    # Проверяем подписку
-    if not await check_subscription(user_id):
-        subscription_text = "📢 <b>Для использования бота необходимо подписаться на наши каналы:</b>\n\n"
-        for channel in REQUIRED_CHANNELS:
-            subscription_text += f"🔹 {channel['name']} - {channel['url']}\n"
-        
-        subscription_text += "\nПосле подписки нажми кнопку ниже 👇"
-        
-        await message.answer(
-            subscription_text,
-            reply_markup=get_subscription_keyboard()
-        )
-        return
     
     # Если подписан, продолжаем как обычно
     if user_id not in user_data:
@@ -212,20 +138,6 @@ async def start_cmd(message: types.Message):
 async def referral_cmd(message: types.Message):
     user_id = message.from_user.id
     
-    # Проверяем подписку
-    if not await check_subscription(user_id):
-        subscription_text = "❌ <b>Для использования этой команды необходимо подписаться на наши каналы:</b>\n\n"
-        for channel in REQUIRED_CHANNELS:
-            subscription_text += f"🔹 {channel['name']} - {channel['url']}\n"
-        
-        subscription_text += "\nПосле подписки нажми кнопку ниже 👇"
-        
-        await message.answer(
-            subscription_text,
-            reply_markup=get_subscription_keyboard()
-        )
-        return
-    
     if user_id not in user_data:
         user_data[user_id] = {
             "balance": 0, 
@@ -264,29 +176,7 @@ async def referral_cmd(message: types.Message):
     
     await message.answer(text, reply_markup=keyboard)
 
-# Декоратор для проверки подписки перед выполнением команд
-def subscription_required(func):
-    async def wrapper(message: types.Message, *args, **kwargs):
-        user_id = message.from_user.id
-        
-        if not await check_subscription(user_id):
-            subscription_text = "❌ <b>Для использования этой команды необходимо подписаться на наши каналы:</b>\n\n"
-            for channel in REQUIRED_CHANNELS:
-                subscription_text += f"🔹 {channel['name']} - {channel['url']}\n"
-            
-            subscription_text += "\nПосле подписки нажми кнопку ниже 👇"
-            
-            await message.answer(
-                subscription_text,
-                reply_markup=get_subscription_keyboard()
-            )
-            return
-        
-        return await func(message, *args, **kwargs)
-    return wrapper
-
 @dp.message(Command("daily"))
-@subscription_required
 async def daily_cmd(message: types.Message):
     user_id = message.from_user.id
     today = datetime.now().date()
@@ -323,7 +213,6 @@ async def daily_cmd(message: types.Message):
     )
 
 @dp.message(Command("balance"))
-@subscription_required
 async def balance_cmd(message: types.Message):
     user_id = message.from_user.id
     
@@ -346,7 +235,6 @@ async def balance_cmd(message: types.Message):
     await message.answer(text)
 
 @dp.message(Command("rewards"))
-@subscription_required
 async def rewards_cmd(message: types.Message):
     user_id = message.from_user.id
     
@@ -374,7 +262,6 @@ async def rewards_cmd(message: types.Message):
     await message.answer(text)
 
 @dp.message(Command("top"))
-@subscription_required
 async def top_cmd(message: types.Message):
     if not user_data:
         await message.answer("📊 Нет данных")
@@ -402,7 +289,6 @@ async def top_cmd(message: types.Message):
 
 # Обработчик покупки
 @dp.message(lambda message: message.text and message.text.lower().startswith('куплю'))
-@subscription_required
 async def buy_reward(message: types.Message):
     user_id = message.from_user.id
     
