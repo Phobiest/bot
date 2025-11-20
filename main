@@ -84,7 +84,7 @@ async def start_cmd(message: types.Message):
         except ValueError:
             referrer_id = None
     
-    # Если подписан, продолжаем как обычно
+    # Создаем пользователя только если его нет
     if user_id not in user_data:
         user_data[user_id] = {
             "balance": 0, 
@@ -179,8 +179,8 @@ async def referral_cmd(message: types.Message):
 @dp.message(Command("daily"))
 async def daily_cmd(message: types.Message):
     user_id = message.from_user.id
-    today = datetime.now().date()
     
+    # Создаем пользователя если его нет
     if user_id not in user_data:
         user_data[user_id] = {
             "balance": 0, 
@@ -189,12 +189,18 @@ async def daily_cmd(message: types.Message):
             "referrer": None
         }
     
+    today = datetime.now().date()
     last_daily = user_data[user_id]["last_daily"]
     
     # Конвертируем строку обратно в datetime.date если нужно
     if last_daily and isinstance(last_daily, str):
-        last_daily = datetime.fromisoformat(last_daily).date()
-        user_data[user_id]["last_daily"] = last_daily
+        try:
+            last_daily = datetime.fromisoformat(last_daily).date()
+            user_data[user_id]["last_daily"] = last_daily
+        except ValueError:
+            # Если дата в неправильном формате, сбрасываем
+            last_daily = None
+            user_data[user_id]["last_daily"] = None
     
     if last_daily and last_daily == today:
         await message.answer("❌ Уже получал награду сегодня!")
@@ -365,7 +371,7 @@ async def buy_reward(message: types.Message):
 # Функция для автосохранения данных
 async def auto_save():
     while True:
-        await asyncio.sleep(300)  # Сохраняем каждые 5 минут
+        await asyncio.sleep(30)  # Сохраняем каждые 30 секунд
         save_user_data()
         print("💾 Данные автоматически сохранены")
 
